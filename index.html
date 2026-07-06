@@ -143,12 +143,27 @@ img{display:block;max-width:100%}
 /* ── Modals ── */
 .modal-overlay{position:fixed;inset:0;background:rgba(10,12,26,0.85);z-index:200;backdrop-filter:blur(3px)}
 .modal-overlay.hidden{display:none}
+/* Bottom sheet — for modals without primary text input (game detail, player detail, reset) */
 .modal{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:480px;background:var(--navy-light);border-radius:var(--radius-lg) var(--radius-lg) 0 0;z-index:210;max-height:92dvh;overflow-y:auto;padding:24px 20px calc(32px + var(--safe-bottom))}
 .modal.hidden{display:none}
+/* Centered dialog — for input-heavy modals (add game, add player, log play, etc.)
+   Anchored to viewport center so the keyboard sliding up underneath doesn't move it */
+.modal--centered{bottom:auto;top:50%;transform:translate(-50%,-50%);border-radius:var(--radius-lg);max-height:85dvh;padding:24px 20px 28px}
 .modal__handle{width:36px;height:4px;background:rgba(255,255,255,0.2);border-radius:2px;margin:0 auto 20px}
 .modal__title{font-family:'Playfair Display',serif;font-size:22px;font-weight:700;color:var(--text-on-dark);margin-bottom:20px}
 .modal__close{position:absolute;top:20px;right:20px;color:var(--text-on-dark-muted);padding:4px}
 .modal__close svg{width:22px;height:22px}
+
+/* ── Settings view ── */
+.settings-item{background:var(--navy-light);border-radius:var(--radius-md);padding:16px 20px;margin:0 20px 10px;display:flex;align-items:center;gap:14px;cursor:pointer;transition:background 0.15s}
+.settings-item:hover{background:var(--navy-mid)}
+.settings-item__icon{font-size:22px;flex-shrink:0;width:36px;text-align:center}
+.settings-item__body{flex:1}
+.settings-item__label{font-size:15px;font-weight:600;color:var(--text-on-dark)}
+.settings-item__desc{font-size:12px;color:var(--text-on-dark-muted);margin-top:2px}
+.settings-item__arrow{color:var(--text-on-dark-muted)}
+.settings-token-input{width:100%;padding:12px 14px;background:var(--navy-mid);border:1px solid rgba(255,255,255,0.1);border-radius:var(--radius-sm);color:var(--text-on-dark);font-size:13px;font-family:monospace;outline:none;transition:border-color 0.15s;margin-top:8px}
+.settings-token-input:focus{border-color:var(--amber)}
 
 /* ── Description collapsible ── */
 .description-text{font-size:13px;color:var(--text-on-dark-muted);line-height:1.7;margin-bottom:8px;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3}
@@ -230,15 +245,16 @@ img{display:block;max-width:100%}
   <div id="view-players" class="view"></div>
   <div id="view-tonight" class="view"></div>
   <div id="view-discover" class="view"></div>
+  <div id="view-settings" class="view"></div>
 
   <div id="modal-overlay" class="modal-overlay hidden"></div>
   <div id="modal-game-detail" class="modal hidden"></div>
   <div id="modal-player-detail" class="modal hidden"></div>
-  <div id="modal-add-game" class="modal hidden"></div>
-  <div id="modal-add-player" class="modal hidden"></div>
-  <div id="modal-log-play" class="modal hidden"></div>
-  <div id="modal-edit-session" class="modal hidden"></div>
-  <div id="modal-add-wishlist" class="modal hidden"></div>
+  <div id="modal-add-game" class="modal modal--centered hidden"></div>
+  <div id="modal-add-player" class="modal modal--centered hidden"></div>
+  <div id="modal-log-play" class="modal modal--centered hidden"></div>
+  <div id="modal-edit-session" class="modal modal--centered hidden"></div>
+  <div id="modal-add-wishlist" class="modal modal--centered hidden"></div>
 
   <div id="modal-reset" class="modal hidden">
     <div class="modal__handle"></div>
@@ -282,12 +298,18 @@ img{display:block;max-width:100%}
 <script>
 // ─────────────────────────────────────────────────────────
 // BGG TOKEN
+// Reads from localStorage first (set via Settings).
+// Falls back to the hardcoded constant if nothing stored.
 // ─────────────────────────────────────────────────────────
-const BGG_TOKEN = 'de2dd402-0f2f-427c-a8c8-a7010c217d3c';
-const BGG_BASE  = 'https://boardgamegeek.com/xmlapi2';
+const BGG_TOKEN_FALLBACK = 'PASTE_YOUR_TOKEN_HERE';
+const BGG_BASE = 'https://boardgamegeek.com/xmlapi2';
+
+function getBggToken() {
+  return localStorage.getItem('tt_bgg_token') || BGG_TOKEN_FALLBACK;
+}
 
 async function bggFetch(url) {
-  const res = await fetch(url, { headers: { 'Authorization': `Bearer ${BGG_TOKEN}` } });
+  const res = await fetch(url, { headers: { 'Authorization': `Bearer ${getBggToken()}` } });
   if (!res.ok) throw new Error(`BGG ${res.status}`);
   return res.text();
 }
@@ -508,37 +530,6 @@ function formatDate(iso) {
 }
 function playTimeLabel(min,max) { if(!min&&!max)return null; if(!min||min===max)return`${max}m`; return`${min}–${max}m`; }
 
-// Long press — fires callback after duration ms of uninterrupted press.
-// On Android, touch events generate synthetic mouse events immediately after,
-// which caused the mousemove cancel handler to fire and kill the timer prematurely.
-// Solution: use touch events only on the element itself, and keep mouse events
-// only for desktop browsers (detected by checking for touch support).
-// touchmove still cancels — that handles the "scrolling over the element" case.
-function attachLongPress(el, duration, callback) {
-  if (!el) return;
-  let timer = null;
-  const start = () => { timer = setTimeout(callback, duration); };
-  const cancel = () => { clearTimeout(timer); timer = null; };
-
-  const hasTouch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
-
-  if (hasTouch) {
-    // Touch device — use touch events only.
-    // We do NOT add mouse listeners because Android fires synthetic
-    // mousemove events immediately after touchstart, cancelling the timer.
-    el.addEventListener('touchstart', e => { e.preventDefault(); start(); }, { passive: false });
-    el.addEventListener('touchend', cancel);
-    el.addEventListener('touchcancel', cancel);
-    el.addEventListener('touchmove', cancel);
-  } else {
-    // Desktop mouse — no touch interference to worry about
-    el.addEventListener('mousedown', start);
-    el.addEventListener('mouseup', cancel);
-    el.addEventListener('mouseleave', cancel);
-    el.addEventListener('mousemove', cancel);
-  }
-}
-
 function confirmReset() {
   Object.values(KEYS).forEach(key=>localStorage.removeItem(key));
   hotCache=null; discoverSection='wishlist';
@@ -599,9 +590,12 @@ function renderHome() {
 
   el.innerHTML=`
     <div class="page-header" style="position:relative">
-      <h1 id="home-title" style="cursor:default;user-select:none">Tabletop</h1>
+      <h1>Tabletop</h1>
       <p>Your board game stats at a glance</p>
-      <span style="position:absolute;top:56px;right:20px;font-size:11px;color:var(--text-on-dark-muted);font-weight:500">v1.4</span>
+      <span style="position:absolute;top:56px;right:48px;font-size:11px;color:var(--text-on-dark-muted);font-weight:500">v1.1</span>
+      <button onclick="navigateTo('settings')" style="position:absolute;top:52px;right:16px;color:var(--text-on-dark-muted);padding:4px" title="Settings">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+      </button>
     </div>
     <div class="stat-row">
       <div class="stat-pill"><div class="stat-pill__value">${games.length}</div><div class="stat-pill__label">Games</div></div>
@@ -611,8 +605,6 @@ function renderHome() {
     ${mostPlayedHTML}
     <div class="section-label" style="margin-top:${mostPlayed?'24px':'0'}">Recent sessions</div>
     <div class="activity-list">${recentHTML}</div>`;
-
-  attachLongPress(document.getElementById('home-title'),5000,()=>openModal('modal-reset'));
 }
 
 function renderGames() {
@@ -1468,6 +1460,63 @@ function saveEditSession() {
 // ─────────────────────────────────────────────────────────
 // NAVIGATION & MODALS
 // ─────────────────────────────────────────────────────────
+function renderSettings() {
+  const el = document.getElementById('view-settings');
+  const currentToken = localStorage.getItem('tt_bgg_token') || '';
+
+  el.innerHTML = `
+    <div class="page-header" style="position:relative">
+      <button onclick="navigateTo('home')" style="position:absolute;top:52px;left:0;color:var(--text-on-dark-muted);padding:4px 20px;display:flex;align-items:center;gap:6px;font-size:14px">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15,18 9,12 15,6"/></svg>
+        Home
+      </button>
+      <h1 style="padding-left:0">Settings</h1>
+      <p>App version v1.1</p>
+    </div>
+
+    <div class="section-label">BoardGameGeek</div>
+    <div style="margin:0 20px 24px;background:var(--navy-light);border-radius:var(--radius-md);padding:16px 20px">
+      <div style="font-size:13px;font-weight:600;color:var(--text-on-dark);margin-bottom:4px">API Token</div>
+      <div style="font-size:12px;color:var(--text-on-dark-muted);margin-bottom:10px;line-height:1.5">
+        Your BGG bearer token for search and game data. Get or rotate tokens at
+        <a href="https://boardgamegeek.com/applications" target="_blank" rel="noopener" style="color:var(--amber)">boardgamegeek.com/applications</a>.
+      </div>
+      <input class="settings-token-input" type="text" id="token-input"
+        placeholder="Paste your BGG bearer token here"
+        value="${currentToken}" autocomplete="off" autocorrect="off" spellcheck="false" />
+      <button class="btn btn--primary btn--full" style="margin-top:12px" onclick="saveToken()">Save token</button>
+      <div id="token-status" style="font-size:12px;color:var(--green);margin-top:8px;min-height:18px"></div>
+    </div>
+
+    <div class="section-label">Data</div>
+    <div class="settings-item" onclick="openModal('modal-reset')">
+      <div class="settings-item__icon">🗑️</div>
+      <div class="settings-item__body">
+        <div class="settings-item__label">Reset all data</div>
+        <div class="settings-item__desc">Delete all games, players, sessions and achievements</div>
+      </div>
+      <div class="settings-item__arrow"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9,18 15,12 9,6"/></svg></div>
+    </div>
+
+    <div class="section-label" style="margin-top:24px">About</div>
+    <div style="margin:0 20px;background:var(--navy-light);border-radius:var(--radius-md);padding:16px 20px">
+      <div style="font-size:13px;color:var(--text-on-dark-muted);line-height:1.6">
+        Tabletop v1.1 · Built for your game group.<br/>
+        Data is stored locally on this device.<br/>
+        Game data powered by <a href="https://boardgamegeek.com" target="_blank" rel="noopener" style="color:var(--amber)">BoardGameGeek</a>.
+      </div>
+    </div>`;
+}
+
+function saveToken() {
+  const val = document.getElementById('token-input')?.value?.trim();
+  if (!val) { alert('Please paste your BGG token first.'); return; }
+  localStorage.setItem('tt_bgg_token', val);
+  hotCache = null; // invalidate hot cache so next fetch uses new token
+  const status = document.getElementById('token-status');
+  if (status) { status.textContent = '✓ Token saved'; setTimeout(() => { status.textContent = ''; }, 3000); }
+}
+
 function navigateTo(viewName) {
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
   document.querySelectorAll('.nav-btn[data-view]').forEach(b=>b.classList.remove('active'));
@@ -1475,12 +1524,12 @@ function navigateTo(viewName) {
   const btn=document.querySelector(`.nav-btn[data-view="${viewName}"]`);
   if(view)view.classList.add('active'); if(btn)btn.classList.add('active');
 
-  // Show the correct action pill for this tab; hide all others
+  // Pills — hide all, then show the right one for this tab
   document.getElementById('pill-add-game').classList.toggle('hidden', viewName!=='games' || gamesSection!=='games');
   document.getElementById('pill-add-player').classList.toggle('hidden', viewName!=='players');
   document.getElementById('pill-add-wishlist').classList.toggle('hidden', viewName!=='discover'||discoverSection!=='wishlist');
 
-  const renderers={home:renderHome,games:renderGames,players:renderPlayers,discover:renderDiscover};
+  const renderers={home:renderHome,games:renderGames,players:renderPlayers,discover:renderDiscover,settings:renderSettings};
   renderers[viewName]?.();
   window.scrollTo(0,0);
 }
@@ -1501,15 +1550,12 @@ function renderCurrent(){
 }
 function openModal(id){document.getElementById('modal-overlay').classList.remove('hidden');document.getElementById(id).classList.remove('hidden');document.body.style.overflow='hidden';}
 function closeModal(id){
-  const modal=document.getElementById(id);
-  modal.classList.add('hidden');
-  modal.style.maxHeight=''; // reset keyboard-adjusted height so it opens correctly next time
-  modal.style.transform='';
+  document.getElementById(id).classList.add('hidden');
   const anyOpen=[...document.querySelectorAll('.modal')].some(m=>!m.classList.contains('hidden'));
   if(!anyOpen){document.getElementById('modal-overlay').classList.add('hidden');document.body.style.overflow='';}
 }
 function closeAllModals(){
-  document.querySelectorAll('.modal').forEach(m=>{m.classList.add('hidden');m.style.maxHeight='';m.style.transform='';});
+  document.querySelectorAll('.modal').forEach(m=>m.classList.add('hidden'));
   document.getElementById('modal-overlay').classList.add('hidden');document.body.style.overflow='';
 }
 
@@ -1523,34 +1569,10 @@ document.addEventListener('DOMContentLoaded',()=>{
   navigateTo('home');
   if(!db.getPlayers().length&&!db.getGames().length) seedDemoData();
 
-  // ── Keyboard handling ──────────────────────────────────
-  // When the soft keyboard opens, visualViewport.height shrinks to the visible area.
-  // Rather than pushing the modal up (which causes tall modals to disappear off the top),
-  // we shrink the modal's max-height to fit the visible space — making it scrollable instead.
-  // This way the modal stays anchored at the bottom and the user scrolls within it to find inputs.
-  // On keyboard close, visualViewport.height returns to full size and we reset max-height
-  // back to empty so the CSS 92dvh rule takes over again.
-  if (window.visualViewport) {
-    window.visualViewport.addEventListener('resize', () => {
-      const visibleHeight = window.visualViewport.height;
-      document.querySelectorAll('.modal:not(.hidden)').forEach(modal => {
-        if (visibleHeight < window.innerHeight * 0.75) {
-          // Keyboard is open — constrain modal height to visible area
-          modal.style.maxHeight = `${visibleHeight * 0.92}px`;
-          modal.style.transform = '';
-        } else {
-          // Keyboard closed — restore CSS defaults
-          modal.style.maxHeight = '';
-          modal.style.transform = '';
-        }
-      });
-    });
-  }
-
-  // When an input is focused, wait for the keyboard animation to finish (~300ms)
-  // then scroll it into view. block:'nearest' is better than 'center' here —
-  // 'center' can over-scroll and hide the input label above it, 'nearest' just
-  // ensures the input is visible without moving it more than necessary.
+  // Scroll focused inputs into view after keyboard opens.
+  // 300ms delay lets the keyboard animation finish first.
+  // block:'nearest' scrolls the minimum needed — avoids overshooting
+  // and hiding the label above the input.
   document.addEventListener('focusin', e => {
     if (e.target.matches('input, select, textarea')) {
       setTimeout(() => e.target.scrollIntoView({ behavior:'smooth', block:'nearest' }), 300);
