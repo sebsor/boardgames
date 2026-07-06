@@ -543,42 +543,35 @@ let gamesSearch  = '';     // search input value
 let gamesSort    = 'added'; // 'added' | 'name' | 'plays' | 'rating'
 let sortOpen     = false;  // sort dropdown visibility
 let gamesSection = 'games'; // 'games' | 'tonight' — which sub-view is active
-let gamesFilterExpanded = false; // whether the mechanic bar shows all chips or just row 1
+let gamesFilterExpanded = false;
+let gamesFilterOverflow = []; // cached references to chips that don't fit on row 1
 
-// collapseFilterBar runs after every renderGames paint via requestAnimationFrame.
-// It measures which chips fall below the first row by comparing their top Y position
-// to the first chip's top Y — any chip on a lower row gets hidden.
-// Then it adds a "+ N more" toggle chip. If all chips fit on one row, nothing is added.
-//
-// Why requestAnimationFrame and not just running this synchronously in renderGames?
-// Because getBoundingClientRect() only returns real pixel positions after the browser
-// has done a layout pass. If you call it synchronously after setting innerHTML,
-// the DOM exists but the browser hasn't calculated positions yet — all chips report
-// the same Y coordinate (0 or the container's top). requestAnimationFrame defers
-// until after the next paint, at which point positions are real and measurable.
 function collapseFilterBar() {
   const bar = document.getElementById('mechanic-bar');
   if (!bar) return;
   const chips = [...bar.querySelectorAll('.mechanic-chip:not(.mechanic-chip--more)')];
   if (!chips.length) return;
 
-  const firstRowY = chips[0].getBoundingClientRect().top;
-  // +4px tolerance for sub-pixel rendering differences across devices
-  const overflowChips = chips.filter(c => c.getBoundingClientRect().top > firstRowY + 4);
-
-  // Remove any existing "more" chip before rebuilding to avoid duplicates
-  bar.querySelector('.mechanic-chip--more')?.remove();
-
-  if (!overflowChips.length) {
-    gamesFilterExpanded = false;
-    return; // everything fits — nothing to do
+  // Only measure positions when collapsed — hidden chips have no layout position,
+  // so we can't measure them when expanded. We cache the overflow list instead
+  // and reuse it when toggling, only re-measuring after a fresh render (collapsed state).
+  if (!gamesFilterExpanded) {
+    const firstRowY = chips[0].getBoundingClientRect().top;
+    gamesFilterOverflow = chips.filter(c => c.getBoundingClientRect().top > firstRowY + 4);
   }
 
-  overflowChips.forEach(c => { c.style.display = gamesFilterExpanded ? '' : 'none'; });
+  bar.querySelector('.mechanic-chip--more')?.remove();
+
+  if (!gamesFilterOverflow.length) {
+    gamesFilterExpanded = false;
+    return;
+  }
+
+  gamesFilterOverflow.forEach(c => { c.style.display = gamesFilterExpanded ? '' : 'none'; });
 
   const moreBtn = document.createElement('button');
   moreBtn.className = `mechanic-chip mechanic-chip--more${gamesFilterExpanded ? ' expanded' : ''}`;
-  moreBtn.textContent = gamesFilterExpanded ? 'Show less ▲' : `+ ${overflowChips.length} more`;
+  moreBtn.textContent = gamesFilterExpanded ? 'Show less ▲' : `+ ${gamesFilterOverflow.length} more`;
   moreBtn.onclick = () => { gamesFilterExpanded = !gamesFilterExpanded; collapseFilterBar(); };
   bar.appendChild(moreBtn);
 }
@@ -696,6 +689,7 @@ function renderGames() {
   // at which point getBoundingClientRect() returns real pixel positions.
   // Without this the chips have no layout yet and all report the same Y position.
   if (mechanics.length) {
+    gamesFilterOverflow = []; // reset cache so fresh DOM chips get measured
     requestAnimationFrame(() => collapseFilterBar());
   }
 
@@ -1538,7 +1532,7 @@ function renderSettings() {
         </button>
         <h1>Settings</h1>
       </div>
-      <p>Tabletop v1.5</p>
+      <p>Tabletop v1.6</p>
     </div>
 
     <div class="section-label">Data</div>
