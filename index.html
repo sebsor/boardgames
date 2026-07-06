@@ -271,10 +271,6 @@ img{display:block;max-width:100%}
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
       <span>Players</span>
     </button>
-    <button class="nav-btn" data-view="tonight">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26"/></svg>
-      <span>Tonight</span>
-    </button>
     <button class="nav-btn" data-view="discover">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="16.24,7.76 14.12,14.12 7.76,16.24 9.88,9.88"/></svg>
       <span>Discover</span>
@@ -286,7 +282,7 @@ img{display:block;max-width:100%}
 // ─────────────────────────────────────────────────────────
 // BGG TOKEN
 // ─────────────────────────────────────────────────────────
-const BGG_TOKEN = 'de2dd402-0f2f-427c-a8c8-a7010c217d3c';
+const BGG_TOKEN = 'PASTE_YOUR_TOKEN_HERE';
 const BGG_BASE  = 'https://boardgamegeek.com/xmlapi2';
 
 async function bggFetch(url) {
@@ -542,6 +538,7 @@ let gamesFilter  = null;   // active mechanic chip
 let gamesSearch  = '';     // search input value
 let gamesSort    = 'added'; // 'added' | 'name' | 'plays' | 'rating'
 let sortOpen     = false;  // sort dropdown visibility
+let gamesSection = 'games'; // 'games' | 'tonight' — which sub-view is active
 
 // Tonight filters — persisted as an object so all four survive tab switching
 const tonightFilters = { players:'2', complexity:'any', playtime:'any', mechanic:'' };
@@ -604,18 +601,38 @@ function renderHome() {
 
 function renderGames() {
   const el=document.getElementById('view-games');
-  const allOwned=db.getOwnedGames();
-  const mechanics=db.getAllMechanics();
 
-  // Apply filters: mechanic chip + search text
-  let games=gamesFilter?allOwned.filter(g=>(g.mechanics||[]).includes(gamesFilter)):allOwned;
-  if(gamesSearch.trim()) {
-    const q=gamesSearch.trim().toLowerCase();
-    games=games.filter(g=>g.title.toLowerCase().includes(q));
+  // Toggle bar — same pattern as Discover's Wishlist/Hot toggle.
+  // gamesSection persists across re-renders so switching to Tonight and back keeps your place.
+  const toggleHTML=`
+    <div class="discover-toggle" style="margin:0 20px 20px">
+      <button class="discover-tab ${gamesSection==='games'?'active':''}" onclick="gamesSection='games';sortOpen=false;renderGames()">🎲 My Games</button>
+      <button class="discover-tab ${gamesSection==='tonight'?'active':''}" onclick="gamesSection='tonight';renderGames()">⭐ Tonight</button>
+    </div>`;
+
+  // When Tonight is selected, we render its content inside the Games view.
+  // renderTonight() writes to #view-tonight, so we can't call it directly —
+  // instead we inline the Tonight content generation here.
+  if(gamesSection==='tonight') {
+    // Hide the add-game pill — Tonight doesn't need it
+    document.getElementById('pill-add-game').classList.add('hidden');
+    el.innerHTML=`
+      <div class="page-header"><h1>Games</h1><p>Find the right game for tonight</p></div>
+      ${toggleHTML}`;
+    // Append tonight content into the Games view
+    renderTonightInto(el);
+    return;
   }
 
-  // Apply sort. 'added' is insertion order (default), others re-sort the array.
-  // We sort a copy so the original store order is never mutated.
+  // ── My Games section ────────────────────────────────────
+  // Restore the pill when back on My Games
+  document.getElementById('pill-add-game').classList.remove('hidden');
+
+  const allOwned=db.getOwnedGames();
+  const mechanics=db.getAllMechanics();
+  let games=gamesFilter?allOwned.filter(g=>(g.mechanics||[]).includes(gamesFilter)):allOwned;
+  if(gamesSearch.trim()){const q=gamesSearch.trim().toLowerCase();games=games.filter(g=>g.title.toLowerCase().includes(q));}
+
   const sorted=[...games];
   if(gamesSort==='name')   sorted.sort((a,b)=>a.title.localeCompare(b.title));
   if(gamesSort==='plays')  sorted.sort((a,b)=>db.getGameHealth(b.id).plays-db.getGameHealth(a.id).plays);
@@ -647,14 +664,14 @@ function renderGames() {
     <div class="empty-state__body">${gamesSearch?`No games matching "${gamesSearch}".`:gamesFilter?'Try a different mechanic.':'Add your first game to start tracking.'}</div>
   </div>`;
 
-  // Sort dropdown — positioned relative to the toolbar container
   const sortDropdown=sortOpen?`
     <div class="sort-dropdown">
       ${Object.entries(SORT_LABELS).map(([k,v])=>`<div class="sort-option ${gamesSort===k?'active':''}" onclick="gamesSort='${k}';sortOpen=false;renderGames()">${v}</div>`).join('')}
     </div>`:'';
 
   el.innerHTML=`
-    <div class="page-header"><h1>My Games</h1><p>${allOwned.length} game${allOwned.length!==1?'s':''} in your collection</p></div>
+    <div class="page-header"><h1>Games</h1><p>${allOwned.length} game${allOwned.length!==1?'s':''} in your collection</p></div>
+    ${toggleHTML}
     <div style="position:relative">
       <div class="games-toolbar">
         <input class="games-search" type="text" placeholder="Search games…" value="${gamesSearch}"
@@ -691,17 +708,16 @@ function renderPlayers() {
     <div class="player-list" style="margin-bottom:80px">${playersHTML}</div>`;
 }
 
-function renderTonight() {
-  const el=document.getElementById('view-tonight');
+// renderTonightInto accepts any container element.
+// renderTonight() (called by navigateTo for the now-unused view-tonight) delegates to it.
+// renderGames() also calls it when gamesSection==='tonight'.
+// This avoids duplicating the Tonight HTML — one source of truth, two possible containers.
+function renderTonightInto(container) {
   const games=db.getOwnedGames();
   const maxP=Math.max(2,...games.map(g=>g.maxPlayers||2),10);
   const mechanics=db.getAllMechanics();
 
-  // tonightFilters is a module-level object — values persist across navigation.
-  // When the user changes a select, we write back to this object before re-rendering,
-  // so the next time renderTonight() runs it restores the saved values.
-  el.innerHTML=`
-    <div class="page-header"><h1>Tonight</h1><p>Find the right game for the evening</p></div>
+  const filtersHTML=`
     <div class="tonight-filters">
       <div class="filter-group">
         <label>How many players?</label>
@@ -739,7 +755,15 @@ function renderTonight() {
     </div>
     <div class="section-label">Suggestions</div>
     <div id="tonight-results"></div>`;
+
+  container.insertAdjacentHTML('beforeend', filtersHTML);
   filterTonight();
+}
+
+function renderTonight() {
+  const el=document.getElementById('view-tonight');
+  el.innerHTML=`<div class="page-header"><h1>Tonight</h1><p>Find the right game for the evening</p></div>`;
+  renderTonightInto(el);
 }
 
 function filterTonight() {
@@ -1436,11 +1460,11 @@ function navigateTo(viewName) {
   if(view)view.classList.add('active'); if(btn)btn.classList.add('active');
 
   // Show the correct action pill for this tab; hide all others
-  document.getElementById('pill-add-game').classList.toggle('hidden',viewName!=='games');
-  document.getElementById('pill-add-player').classList.toggle('hidden',viewName!=='players');
-  document.getElementById('pill-add-wishlist').classList.toggle('hidden',viewName!=='discover'||discoverSection!=='wishlist');
+  document.getElementById('pill-add-game').classList.toggle('hidden', viewName!=='games' || gamesSection!=='games');
+  document.getElementById('pill-add-player').classList.toggle('hidden', viewName!=='players');
+  document.getElementById('pill-add-wishlist').classList.toggle('hidden', viewName!=='discover'||discoverSection!=='wishlist');
 
-  const renderers={home:renderHome,games:renderGames,players:renderPlayers,tonight:renderTonight,discover:renderDiscover};
+  const renderers={home:renderHome,games:renderGames,players:renderPlayers,discover:renderDiscover};
   renderers[viewName]?.();
   window.scrollTo(0,0);
 }
@@ -1456,8 +1480,7 @@ function renderAll(){renderCurrent();}
 function renderCurrent(){
   const active=document.querySelector('.view.active'); if(!active)return;
   const name=active.id.replace('view-','');
-  // discover is excluded from renderAll — it may be mid-fetch
-  const renderers={home:renderHome,games:renderGames,players:renderPlayers,tonight:renderTonight};
+  const renderers={home:renderHome,games:renderGames,players:renderPlayers};
   renderers[name]?.();
 }
 function openModal(id){document.getElementById('modal-overlay').classList.remove('hidden');document.getElementById(id).classList.remove('hidden');document.body.style.overflow='hidden';}
