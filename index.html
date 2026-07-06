@@ -716,22 +716,83 @@ function renderGames() {
       ${Object.entries(SORT_LABELS).map(([k,v])=>`<div class="sort-option ${gamesSort===k?'active':''}" onclick="gamesSort='${k}';sortOpen=false;renderGames()">${v}</div>`).join('')}
     </div>`:'';
 
+  // isDefaultGamesState: true when nothing has been changed from defaults.
+  // Used to disable the reset button — visible always, interactive only when needed.
+  const isDefaultGames = !gamesSearch && !gamesFilter && gamesSort === 'name';
+
   el.innerHTML=`
-    <div class="page-header"><h1>Games</h1><p>${allOwned.length} game${allOwned.length!==1?'s':''} in your collection</p></div>
+    <div class="page-header"><h1>Games</h1><p id="games-subtitle">${allOwned.length} game${allOwned.length!==1?'s':''} in your collection</p></div>
     ${toggleHTML}
     <div style="position:relative">
       <div class="games-toolbar">
         <input class="games-search" type="text" placeholder="Search games…" value="${gamesSearch}"
-          oninput="gamesSearch=this.value;renderGames()" />
-        <button class="sort-btn ${gamesSort!=='added'?'active':''}" onclick="sortOpen=!sortOpen;renderGames()">
+          oninput="gamesSearch=this.value;updateGamesGrid()" />
+        <button class="sort-btn ${gamesSort!=='name'?'active':''}" onclick="sortOpen=!sortOpen;renderGames()">
           Sort ${sortOpen?'▲':'▼'}
         </button>
+        <button class="sort-btn" onclick="resetGamesFilters()" ${isDefaultGames?'disabled':''} style="${isDefaultGames?'opacity:0.35;cursor:default':''}">Reset</button>
       </div>
       ${sortDropdown}
     </div>
     ${mechanicBar}
-    <div class="games-grid" style="margin-bottom:80px">${gamesHTML}</div>
+    <div id="games-grid" class="games-grid" style="margin-bottom:80px">${gamesHTML}</div>
     <div class="bgg-credit">Powered by <a href="https://boardgamegeek.com" target="_blank" rel="noopener">BoardGameGeek</a></div>`;
+}
+
+// updateGamesGrid rebuilds only the games grid and subtitle — not the toolbar or
+// mechanic bar. This is called on every search keystroke so the input element is
+// never destroyed (which would dismiss the keyboard). Only the results below it change.
+function updateGamesGrid() {
+  const grid = document.getElementById('games-grid');
+  const subtitle = document.getElementById('games-subtitle');
+  if (!grid) return;
+
+  const allOwned = db.getOwnedGames();
+  let games = gamesFilter ? allOwned.filter(g=>(g.mechanics||[]).includes(gamesFilter)) : allOwned;
+  if (gamesSearch.trim()) {
+    const q = gamesSearch.trim().toLowerCase();
+    games = games.filter(g => g.title.toLowerCase().includes(q));
+  }
+
+  const sorted = [...games];
+  if (gamesSort==='name')   sorted.sort((a,b)=>a.title.localeCompare(b.title));
+  if (gamesSort==='plays')  sorted.sort((a,b)=>db.getGameHealth(b.id).plays-db.getGameHealth(a.id).plays);
+  if (gamesSort==='rating') sorted.sort((a,b)=>(b.rating||0)-(a.rating||0));
+
+  grid.innerHTML = sorted.length ? sorted.map(g => {
+    const health = db.getGameHealth(g.id);
+    return `<div class="game-card" onclick="openGameDetail('${g.id}')">
+      <div class="game-card__cover">${coverHTML(g)}</div>
+      ${g.rating?`<div class="game-card__rating">★ ${g.rating}</div>`:''}
+      ${health.plays?`<div class="game-card__plays-badge">${health.plays}×</div>`:''}
+      <div class="game-card__info">
+        <div class="game-card__title">${g.title}</div>
+        <div class="game-card__meta">${g.minPlayers}–${g.maxPlayers}p${g.year?` · ${g.year}`:''}</div>
+        <div class="complexity-dots" style="margin-top:6px">${complexityDots(g.complexity)}</div>
+        ${g.expansions?.length?`<div style="font-size:11px;color:var(--text-on-dark-muted);margin-top:6px">📦 ${g.expansions.filter(e=>e.owned).length}/${g.expansions.length} expansions</div>`:''}
+      </div></div>`;
+  }).join('') : `<div class="empty-state" style="grid-column:1/-1">
+    <div class="empty-state__icon">📦</div>
+    <div class="empty-state__title">${gamesSearch||gamesFilter?'No matches':'No games yet'}</div>
+    <div class="empty-state__body">${gamesSearch?`No games matching "${gamesSearch}".`:gamesFilter?'Try a different mechanic.':'Add your first game to start tracking.'}</div>
+  </div>`;
+
+  // Update subtitle to reflect filtered count vs total
+  if (subtitle) {
+    subtitle.textContent = gamesSearch
+      ? `${sorted.length} of ${allOwned.length} game${allOwned.length!==1?'s':''}`
+      : `${allOwned.length} game${allOwned.length!==1?'s':''} in your collection`;
+  }
+}
+
+function resetGamesFilters() {
+  gamesSearch = '';
+  gamesFilter = null;
+  gamesSort = 'name';
+  gamesFilterExpanded = false;
+  gamesFilterOverflow = [];
+  sortOpen = false;
+  renderGames();
 }
 
 function renderPlayers() {
@@ -799,6 +860,10 @@ function renderTonightInto(container) {
           ${mechanics.map(m=>`<option value="${m}" ${tonightFilters.mechanic===m?'selected':''}>${m}</option>`).join('')}
         </select>
       </div>`:''}
+      ${(()=>{
+        const isDefault = tonightFilters.players==='2' && tonightFilters.complexity==='any' && tonightFilters.playtime==='any' && !tonightFilters.mechanic;
+        return `<button class="btn btn--ghost btn--full" onclick="resetTonightFilters()" ${isDefault?'disabled':''} style="margin-top:4px;${isDefault?'opacity:0.35;cursor:default':''}">Reset filters</button>`;
+      })()}
     </div>
     <div class="section-label">Suggestions</div>
     <div id="tonight-results"></div>`;
@@ -811,6 +876,19 @@ function renderTonight() {
   const el=document.getElementById('view-tonight');
   el.innerHTML=`<div class="page-header"><h1>Tonight</h1><p>Find the right game for the evening</p></div>`;
   renderTonightInto(el);
+}
+
+function resetTonightFilters() {
+  tonightFilters.players = '2';
+  tonightFilters.complexity = 'any';
+  tonightFilters.playtime = 'any';
+  tonightFilters.mechanic = '';
+  // Re-render Tonight so the selects reflect the reset values.
+  // We can't just call filterTonight() here because the select elements
+  // would still show the old values — the DOM and the state would be out of sync.
+  // A full re-render of the Tonight section ensures both are aligned.
+  if (gamesSection === 'tonight') renderGames();
+  else renderTonight();
 }
 
 function filterTonight() {
@@ -1280,7 +1358,7 @@ function saveWishlist() {
 // ─────────────────────────────────────────────────────────
 // ADD / EDIT PLAYER MODAL
 // ─────────────────────────────────────────────────────────
-const EMOJIS=['🧙','🧝','🧌','🧟','🏴‍☠️','🤠','👾','🦊','🐉','🌙','⚡','🎩','🦁','🐺','🦅'];
+const EMOJIS = ['🧙','🧝','🧌','🧟','🏴‍☠️','🤠','👾','🦊','🐉','🌙','⚡','🎩','🦁','🐺','🦅','🎲','⚔️','🛡️','🏹','🧚','🧛','🧜','🦄','🐲','🎭','🔮','💀','🦝','🐦‍⬛','🧿'];
 let editingPlayerId=null;
 
 function openAddPlayer(playerId=null) {
@@ -1532,7 +1610,7 @@ function renderSettings() {
         </button>
         <h1>Settings</h1>
       </div>
-      <p>Tabletop v1.8</p>
+      <p>Tabletop v1.9</p>
     </div>
 
     <div class="section-label">Data</div>
