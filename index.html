@@ -283,7 +283,7 @@ img{display:block;max-width:100%}
 // ─────────────────────────────────────────────────────────
 // BGG TOKEN
 // ─────────────────────────────────────────────────────────
-const BGG_TOKEN = 'de2dd402-0f2f-427c-a8c8-a7010c217d3c';
+const BGG_TOKEN = 'PASTE_YOUR_TOKEN_HERE';
 const BGG_BASE  = 'https://boardgamegeek.com/xmlapi2';
 
 async function bggFetch(url) {
@@ -1488,12 +1488,13 @@ function openModal(id){document.getElementById('modal-overlay').classList.remove
 function closeModal(id){
   const modal=document.getElementById(id);
   modal.classList.add('hidden');
-  modal.style.transform=''; // reset any keyboard offset so it opens correctly next time
+  modal.style.maxHeight=''; // reset keyboard-adjusted height so it opens correctly next time
+  modal.style.transform='';
   const anyOpen=[...document.querySelectorAll('.modal')].some(m=>!m.classList.contains('hidden'));
   if(!anyOpen){document.getElementById('modal-overlay').classList.add('hidden');document.body.style.overflow='';}
 }
 function closeAllModals(){
-  document.querySelectorAll('.modal').forEach(m=>{m.classList.add('hidden');m.style.transform='';});
+  document.querySelectorAll('.modal').forEach(m=>{m.classList.add('hidden');m.style.maxHeight='';m.style.transform='';});
   document.getElementById('modal-overlay').classList.add('hidden');document.body.style.overflow='';
 }
 
@@ -1508,27 +1509,36 @@ document.addEventListener('DOMContentLoaded',()=>{
   if(!db.getPlayers().length&&!db.getGames().length) seedDemoData();
 
   // ── Keyboard handling ──────────────────────────────────
-  // visualViewport.height shrinks when the soft keyboard opens.
-  // We measure the gap between window.innerHeight (full screen) and
-  // visualViewport.height (what's actually visible) and push open modals
-  // up by that amount so they sit above the keyboard rather than behind it.
-  // We also reset the transform when the keyboard closes (offset === 0).
+  // When the soft keyboard opens, visualViewport.height shrinks to the visible area.
+  // Rather than pushing the modal up (which causes tall modals to disappear off the top),
+  // we shrink the modal's max-height to fit the visible space — making it scrollable instead.
+  // This way the modal stays anchored at the bottom and the user scrolls within it to find inputs.
+  // On keyboard close, visualViewport.height returns to full size and we reset max-height
+  // back to empty so the CSS 92dvh rule takes over again.
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', () => {
-      const offset = window.innerHeight - window.visualViewport.height;
+      const visibleHeight = window.visualViewport.height;
       document.querySelectorAll('.modal:not(.hidden)').forEach(modal => {
-        modal.style.transform = `translateX(-50%) translateY(-${offset}px)`;
+        if (visibleHeight < window.innerHeight * 0.75) {
+          // Keyboard is open — constrain modal height to visible area
+          modal.style.maxHeight = `${visibleHeight * 0.92}px`;
+          modal.style.transform = '';
+        } else {
+          // Keyboard closed — restore CSS defaults
+          modal.style.maxHeight = '';
+          modal.style.transform = '';
+        }
       });
     });
   }
 
-  // When an input inside a modal is tapped, wait for the keyboard animation
-  // to finish (≈300ms) then scroll the input to the center of the visible area.
-  // Without the delay we'd scroll to a position that's immediately invalidated
-  // by the keyboard still opening.
+  // When an input is focused, wait for the keyboard animation to finish (~300ms)
+  // then scroll it into view. block:'nearest' is better than 'center' here —
+  // 'center' can over-scroll and hide the input label above it, 'nearest' just
+  // ensures the input is visible without moving it more than necessary.
   document.addEventListener('focusin', e => {
     if (e.target.matches('input, select, textarea')) {
-      setTimeout(() => e.target.scrollIntoView({ behavior:'smooth', block:'center' }), 300);
+      setTimeout(() => e.target.scrollIntoView({ behavior:'smooth', block:'nearest' }), 300);
     }
   });
 });
