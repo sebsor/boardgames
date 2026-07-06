@@ -726,7 +726,7 @@ function renderGames() {
     <div style="position:relative">
       <div class="games-toolbar">
         <input class="games-search" type="text" placeholder="Search games…" value="${gamesSearch}"
-          oninput="gamesSearch=this.value;updateGamesGrid()" />
+          oninput="gamesSearch=this.value;updateGamesGrid()" style="min-width:0;max-width:180px" />
         <button class="sort-btn ${gamesSort!=='name'?'active':''}" onclick="sortOpen=!sortOpen;renderGames()">
           Sort ${sortOpen?'▲':'▼'}
         </button>
@@ -782,6 +782,17 @@ function updateGamesGrid() {
     subtitle.textContent = gamesSearch
       ? `${sorted.length} of ${allOwned.length} game${allOwned.length!==1?'s':''}`
       : `${allOwned.length} game${allOwned.length!==1?'s':''} in your collection`;
+  }
+
+  // Imperatively update the Reset button without re-rendering the toolbar.
+  // renderGames() can't be called here — it would destroy the input and dismiss the keyboard.
+  // Instead we directly patch just the button's attributes to reflect current filter state.
+  const resetBtn = document.querySelector('[title="Reset filters"]');
+  if (resetBtn) {
+    const isDefault = !gamesSearch && !gamesFilter && gamesSort === 'name';
+    resetBtn.disabled = isDefault;
+    resetBtn.style.opacity = isDefault ? '0.4' : '1';
+    resetBtn.style.color = isDefault ? 'var(--text-on-dark-muted)' : 'var(--amber)';
   }
 }
 
@@ -1610,7 +1621,7 @@ function renderSettings() {
         </button>
         <h1>Settings</h1>
       </div>
-      <p>Tabletop v2.0</p>
+      <p>Tabletop v2.1</p>
     </div>
 
     <div class="section-label">Data</div>
