@@ -29,7 +29,7 @@ body{font-family:'Inter',sans-serif;background:var(--navy);color:var(--text-on-d
 button{cursor:pointer;border:none;background:none;font-family:inherit}
 input,select,textarea{font-family:inherit}
 img{display:block;max-width:100%}
-#app{max-width:480px;margin:0 auto;min-height:100dvh;position:relative}
+#app{max-width:480px;margin:0 auto;min-height:100dvh;position:relative;overflow-x:hidden}
 .view{display:none;flex-direction:column;min-height:100dvh;padding-bottom:calc(var(--nav-height) + var(--safe-bottom) + 8px)}
 .view.active{display:flex}
 
@@ -730,7 +730,7 @@ function renderGames() {
         <button class="sort-btn ${gamesSort!=='name'?'active':''}" onclick="sortOpen=!sortOpen;renderGames()">
           Sort ${sortOpen?'▲':'▼'}
         </button>
-        <button class="sort-btn" onclick="resetGamesFilters()" ${isDefaultGames?'disabled':''} style="${isDefaultGames?'opacity:0.35;cursor:default':''}">Reset</button>
+        <button onclick="resetGamesFilters()" title="Reset filters" ${isDefaultGames?'disabled':''} style="padding:9px 10px;background:var(--navy-light);border:1px solid rgba(255,255,255,0.1);border-radius:var(--radius-sm);font-size:16px;line-height:1;color:${isDefaultGames?'var(--text-on-dark-muted)':'var(--amber)'};opacity:${isDefaultGames?'0.4':'1'};flex-shrink:0;transition:all 0.15s">↺</button>
       </div>
       ${sortDropdown}
     </div>
@@ -1610,7 +1610,7 @@ function renderSettings() {
         </button>
         <h1>Settings</h1>
       </div>
-      <p>Tabletop v1.9</p>
+      <p>Tabletop v2.0</p>
     </div>
 
     <div class="section-label">Data</div>
