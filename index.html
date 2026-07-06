@@ -283,7 +283,7 @@ img{display:block;max-width:100%}
 // ─────────────────────────────────────────────────────────
 // BGG TOKEN
 // ─────────────────────────────────────────────────────────
-const BGG_TOKEN = 'de2dd402-0f2f-427c-a8c8-a7010c217d3c';
+const BGG_TOKEN = 'PASTE_YOUR_TOKEN_HERE';
 const BGG_BASE  = 'https://boardgamegeek.com/xmlapi2';
 
 async function bggFetch(url) {
@@ -509,19 +509,34 @@ function formatDate(iso) {
 function playTimeLabel(min,max) { if(!min&&!max)return null; if(!min||min===max)return`${max}m`; return`${min}–${max}m`; }
 
 // Long press — fires callback after duration ms of uninterrupted press.
-// Uses a closure so the timer variable is shared between start/cancel handlers.
+// On Android, touch events generate synthetic mouse events immediately after,
+// which caused the mousemove cancel handler to fire and kill the timer prematurely.
+// Solution: use touch events only on the element itself, and keep mouse events
+// only for desktop browsers (detected by checking for touch support).
+// touchmove still cancels — that handles the "scrolling over the element" case.
 function attachLongPress(el, duration, callback) {
-  if(!el) return;
-  let timer=null;
-  const start=()=>{ timer=setTimeout(callback,duration); };
-  const cancel=()=>{ clearTimeout(timer); timer=null; };
-  el.addEventListener('mousedown',start);
-  el.addEventListener('mouseup',cancel);
-  el.addEventListener('mouseleave',cancel);
-  el.addEventListener('mousemove',cancel);
-  el.addEventListener('touchstart',e=>{e.preventDefault();start();},{passive:false});
-  el.addEventListener('touchend',cancel);
-  el.addEventListener('touchmove',cancel);
+  if (!el) return;
+  let timer = null;
+  const start = () => { timer = setTimeout(callback, duration); };
+  const cancel = () => { clearTimeout(timer); timer = null; };
+
+  const hasTouch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+
+  if (hasTouch) {
+    // Touch device — use touch events only.
+    // We do NOT add mouse listeners because Android fires synthetic
+    // mousemove events immediately after touchstart, cancelling the timer.
+    el.addEventListener('touchstart', e => { e.preventDefault(); start(); }, { passive: false });
+    el.addEventListener('touchend', cancel);
+    el.addEventListener('touchcancel', cancel);
+    el.addEventListener('touchmove', cancel);
+  } else {
+    // Desktop mouse — no touch interference to worry about
+    el.addEventListener('mousedown', start);
+    el.addEventListener('mouseup', cancel);
+    el.addEventListener('mouseleave', cancel);
+    el.addEventListener('mousemove', cancel);
+  }
 }
 
 function confirmReset() {
@@ -586,7 +601,7 @@ function renderHome() {
     <div class="page-header" style="position:relative">
       <h1 id="home-title" style="cursor:default;user-select:none">Tabletop</h1>
       <p>Your board game stats at a glance</p>
-      <span style="position:absolute;top:56px;right:20px;font-size:11px;color:var(--text-on-dark-muted);font-weight:500">v1.2</span>
+      <span style="position:absolute;top:56px;right:20px;font-size:11px;color:var(--text-on-dark-muted);font-weight:500">v1.1</span>
     </div>
     <div class="stat-row">
       <div class="stat-pill"><div class="stat-pill__value">${games.length}</div><div class="stat-pill__label">Games</div></div>
