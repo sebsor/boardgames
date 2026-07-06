@@ -301,7 +301,7 @@ img{display:block;max-width:100%}
 // Reads from localStorage first (set via Settings).
 // Falls back to the hardcoded constant if nothing stored.
 // ─────────────────────────────────────────────────────────
-const BGG_TOKEN_FALLBACK = 'PASTE_YOUR_TOKEN_HERE';
+const BGG_TOKEN_FALLBACK = 'de2dd402-0f2f-427c-a8c8-a7010c217d3c';
 const BGG_BASE = 'https://boardgamegeek.com/xmlapi2';
 
 function getBggToken() {
@@ -592,7 +592,7 @@ function renderHome() {
     <div class="page-header" style="position:relative">
       <h1>Tabletop</h1>
       <p>Your board game stats at a glance</p>
-      <span style="position:absolute;top:56px;right:48px;font-size:11px;color:var(--text-on-dark-muted);font-weight:500">v1.1</span>
+      <span style="position:absolute;top:56px;right:48px;font-size:11px;color:var(--text-on-dark-muted);font-weight:500">v1.5</span>
       <button onclick="navigateTo('settings')" style="position:absolute;top:52px;right:16px;color:var(--text-on-dark-muted);padding:4px" title="Settings">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
       </button>
