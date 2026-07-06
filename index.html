@@ -21,6 +21,7 @@
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 *:focus-visible{outline:none}
+*{-webkit-tap-highlight-color:transparent}
 html{font-size:16px;-webkit-text-size-adjust:100%}
 body{font-family:'Inter',sans-serif;background:var(--navy);color:var(--text-on-dark);min-height:100dvh;overflow-x:hidden}
 button{cursor:pointer;border:none;background:none;font-family:inherit}
@@ -282,7 +283,7 @@ img{display:block;max-width:100%}
 // ─────────────────────────────────────────────────────────
 // BGG TOKEN
 // ─────────────────────────────────────────────────────────
-const BGG_TOKEN = 'de2dd402-0f2f-427c-a8c8-a7010c217d3c';
+const BGG_TOKEN = 'PASTE_YOUR_TOKEN_HERE';
 const BGG_BASE  = 'https://boardgamegeek.com/xmlapi2';
 
 async function bggFetch(url) {
@@ -1484,8 +1485,17 @@ function renderCurrent(){
   renderers[name]?.();
 }
 function openModal(id){document.getElementById('modal-overlay').classList.remove('hidden');document.getElementById(id).classList.remove('hidden');document.body.style.overflow='hidden';}
-function closeModal(id){document.getElementById(id).classList.add('hidden');const anyOpen=[...document.querySelectorAll('.modal')].some(m=>!m.classList.contains('hidden'));if(!anyOpen){document.getElementById('modal-overlay').classList.add('hidden');document.body.style.overflow='';}}
-function closeAllModals(){document.querySelectorAll('.modal').forEach(m=>m.classList.add('hidden'));document.getElementById('modal-overlay').classList.add('hidden');document.body.style.overflow='';}
+function closeModal(id){
+  const modal=document.getElementById(id);
+  modal.classList.add('hidden');
+  modal.style.transform=''; // reset any keyboard offset so it opens correctly next time
+  const anyOpen=[...document.querySelectorAll('.modal')].some(m=>!m.classList.contains('hidden'));
+  if(!anyOpen){document.getElementById('modal-overlay').classList.add('hidden');document.body.style.overflow='';}
+}
+function closeAllModals(){
+  document.querySelectorAll('.modal').forEach(m=>{m.classList.add('hidden');m.style.transform='';});
+  document.getElementById('modal-overlay').classList.add('hidden');document.body.style.overflow='';
+}
 
 // ─────────────────────────────────────────────────────────
 // BOOT
@@ -1496,6 +1506,31 @@ document.addEventListener('DOMContentLoaded',()=>{
   document.getElementById('modal-overlay').addEventListener('click',closeAllModals);
   navigateTo('home');
   if(!db.getPlayers().length&&!db.getGames().length) seedDemoData();
+
+  // ── Keyboard handling ──────────────────────────────────
+  // visualViewport.height shrinks when the soft keyboard opens.
+  // We measure the gap between window.innerHeight (full screen) and
+  // visualViewport.height (what's actually visible) and push open modals
+  // up by that amount so they sit above the keyboard rather than behind it.
+  // We also reset the transform when the keyboard closes (offset === 0).
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', () => {
+      const offset = window.innerHeight - window.visualViewport.height;
+      document.querySelectorAll('.modal:not(.hidden)').forEach(modal => {
+        modal.style.transform = `translateX(-50%) translateY(-${offset}px)`;
+      });
+    });
+  }
+
+  // When an input inside a modal is tapped, wait for the keyboard animation
+  // to finish (≈300ms) then scroll the input to the center of the visible area.
+  // Without the delay we'd scroll to a position that's immediately invalidated
+  // by the keyboard still opening.
+  document.addEventListener('focusin', e => {
+    if (e.target.matches('input, select, textarea')) {
+      setTimeout(() => e.target.scrollIntoView({ behavior:'smooth', block:'center' }), 300);
+    }
+  });
 });
 
 // ─────────────────────────────────────────────────────────
