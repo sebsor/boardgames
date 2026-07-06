@@ -726,7 +726,7 @@ function renderGames() {
     <div style="position:relative">
       <div class="games-toolbar">
         <input class="games-search" type="text" placeholder="Search games…" value="${gamesSearch}"
-          oninput="gamesSearch=this.value;updateGamesGrid()" style="min-width:0;max-width:180px" />
+          oninput="gamesSearch=this.value;updateGamesGrid()" style="min-width:0" />
         <button class="sort-btn ${gamesSort!=='name'?'active':''}" onclick="sortOpen=!sortOpen;renderGames()">
           Sort ${sortOpen?'▲':'▼'}
         </button>
@@ -873,7 +873,7 @@ function renderTonightInto(container) {
       </div>`:''}
       ${(()=>{
         const isDefault = tonightFilters.players==='2' && tonightFilters.complexity==='any' && tonightFilters.playtime==='any' && !tonightFilters.mechanic;
-        return `<button class="btn btn--ghost btn--full" onclick="resetTonightFilters()" ${isDefault?'disabled':''} style="margin-top:4px;${isDefault?'opacity:0.35;cursor:default':''}">Reset filters</button>`;
+        return `<button id="tonight-reset-btn" class="btn btn--ghost btn--full" onclick="resetTonightFilters()" ${isDefault?'disabled':''} style="margin-top:4px;opacity:${isDefault?'0.35':'1'};${isDefault?'cursor:default':''}">Reset filters</button>`;
       })()}
     </div>
     <div class="section-label">Suggestions</div>
@@ -904,6 +904,19 @@ function resetTonightFilters() {
 
 function filterTonight() {
   const {players:pc,complexity:cx,playtime:pt,mechanic:mc}=tonightFilters;
+
+  // Imperatively update the Reset button state — same pattern as the Games reset button.
+  // filterTonight() is called on every filter change but doesn't re-render the filter area,
+  // so the button's disabled attribute must be patched directly here rather than relying
+  // on a static value baked in at render time.
+  const resetBtn = document.getElementById('tonight-reset-btn');
+  if (resetBtn) {
+    const isDefault = pc==='2' && cx==='any' && pt==='any' && !mc;
+    resetBtn.disabled = isDefault;
+    resetBtn.style.opacity = isDefault ? '0.35' : '1';
+    resetBtn.style.cursor = isDefault ? 'default' : '';
+  }
+
   const games=db.getGamesForTonight(parseInt(pc),cx,pt,mc);
   const container=document.getElementById('tonight-results');
   if(!container)return;
@@ -1452,6 +1465,7 @@ function openLogPlay(preselectedGameId=null) {
     <div class="form-group">
       <label>Game</label>
       <select id="log-game" onchange="logSelectedExpansions=new Set();renderWinnerPicker();renderExpansionPicker()">
+        <option value="" disabled selected>Choose a game…</option>
         ${games.map(g=>`<option value="${g.id}" ${g.id===preselectedGameId?'selected':''}>${g.title}</option>`).join('')}
       </select>
     </div>
@@ -1621,7 +1635,7 @@ function renderSettings() {
         </button>
         <h1>Settings</h1>
       </div>
-      <p>Tabletop v2.2</p>
+      <p>Tabletop v2.3</p>
     </div>
 
     <div class="section-label">Data</div>
