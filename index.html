@@ -88,10 +88,11 @@ img{display:block;max-width:100%}
 .sort-btn:hover,.sort-btn.active{border-color:var(--amber);color:var(--amber)}
 
 /* ── Mechanic filter bar ── */
-.mechanic-filter-bar{display:flex;gap:8px;padding:0 20px 16px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
-.mechanic-filter-bar::-webkit-scrollbar{display:none}
+.mechanic-filter-bar{display:flex;flex-wrap:wrap;gap:8px;padding:0 20px 16px}
 .mechanic-chip{padding:6px 14px;border-radius:20px;border:1px solid rgba(255,255,255,0.15);color:var(--text-on-dark-muted);font-size:12px;font-weight:500;white-space:nowrap;transition:all 0.15s;flex-shrink:0}
 .mechanic-chip.active{background:rgba(232,168,56,0.15);border-color:var(--amber);color:var(--amber)}
+.mechanic-chip--more{border-color:rgba(255,255,255,0.15);color:var(--text-on-dark-muted)}
+.mechanic-chip--more.expanded{color:var(--amber);border-color:var(--amber)}
 
 /* ── Players ── */
 .player-list{display:flex;flex-direction:column;gap:10px;padding:0 20px}
@@ -542,6 +543,45 @@ let gamesSearch  = '';     // search input value
 let gamesSort    = 'added'; // 'added' | 'name' | 'plays' | 'rating'
 let sortOpen     = false;  // sort dropdown visibility
 let gamesSection = 'games'; // 'games' | 'tonight' — which sub-view is active
+let gamesFilterExpanded = false; // whether the mechanic bar shows all chips or just row 1
+
+// collapseFilterBar runs after every renderGames paint via requestAnimationFrame.
+// It measures which chips fall below the first row by comparing their top Y position
+// to the first chip's top Y — any chip on a lower row gets hidden.
+// Then it adds a "+ N more" toggle chip. If all chips fit on one row, nothing is added.
+//
+// Why requestAnimationFrame and not just running this synchronously in renderGames?
+// Because getBoundingClientRect() only returns real pixel positions after the browser
+// has done a layout pass. If you call it synchronously after setting innerHTML,
+// the DOM exists but the browser hasn't calculated positions yet — all chips report
+// the same Y coordinate (0 or the container's top). requestAnimationFrame defers
+// until after the next paint, at which point positions are real and measurable.
+function collapseFilterBar() {
+  const bar = document.getElementById('mechanic-bar');
+  if (!bar) return;
+  const chips = [...bar.querySelectorAll('.mechanic-chip:not(.mechanic-chip--more)')];
+  if (!chips.length) return;
+
+  const firstRowY = chips[0].getBoundingClientRect().top;
+  // +4px tolerance for sub-pixel rendering differences across devices
+  const overflowChips = chips.filter(c => c.getBoundingClientRect().top > firstRowY + 4);
+
+  // Remove any existing "more" chip before rebuilding to avoid duplicates
+  bar.querySelector('.mechanic-chip--more')?.remove();
+
+  if (!overflowChips.length) {
+    gamesFilterExpanded = false;
+    return; // everything fits — nothing to do
+  }
+
+  overflowChips.forEach(c => { c.style.display = gamesFilterExpanded ? '' : 'none'; });
+
+  const moreBtn = document.createElement('button');
+  moreBtn.className = `mechanic-chip mechanic-chip--more${gamesFilterExpanded ? ' expanded' : ''}`;
+  moreBtn.textContent = gamesFilterExpanded ? 'Show less ▲' : `+ ${overflowChips.length} more`;
+  moreBtn.onclick = () => { gamesFilterExpanded = !gamesFilterExpanded; collapseFilterBar(); };
+  bar.appendChild(moreBtn);
+}
 
 // Tonight filters — persisted as an object so all four survive tab switching
 const tonightFilters = { players:'2', complexity:'any', playtime:'any', mechanic:'' };
@@ -643,11 +683,21 @@ function renderGames() {
 
   const SORT_LABELS={ added:'Date added', name:'Name', plays:'Most played', rating:'BGG rating' };
 
-  const mechanicBar=mechanics.length?`
-    <div class="mechanic-filter-bar">
+  // gamesFilterExpanded tracks whether the mechanic bar is showing all chips or just the first row.
+  // It lives outside renderGames so expanding/collapsing doesn't lose the active filter.
+  const mechanicBar = mechanics.length ? `
+    <div class="mechanic-filter-bar" id="mechanic-bar">
       <button class="mechanic-chip ${!gamesFilter?'active':''}" onclick="gamesFilter=null;renderGames()">All</button>
-      ${mechanics.map(m=>`<button class="mechanic-chip ${gamesFilter===m?'active':''}" onclick="gamesFilter=decodeURIComponent('${encodeURIComponent(m)}');renderGames()">${m}</button>`).join('')}
-    </div>`:'';
+      ${mechanics.map(m=>`<button class="mechanic-chip ${gamesFilter===m?'active':''}" data-mechanic="${encodeURIComponent(m)}" onclick="gamesFilter=decodeURIComponent('${encodeURIComponent(m)}');renderGames()">${m}</button>`).join('')}
+    </div>` : '';
+
+  // We need to collapse after the DOM is painted so we can measure chip positions.
+  // requestAnimationFrame waits until the browser has done a paint cycle,
+  // at which point getBoundingClientRect() returns real pixel positions.
+  // Without this the chips have no layout yet and all report the same Y position.
+  if (mechanics.length) {
+    requestAnimationFrame(() => collapseFilterBar());
+  }
 
   const gamesHTML=sorted.length?sorted.map(g=>{
     const health=db.getGameHealth(g.id);
@@ -1488,7 +1538,7 @@ function renderSettings() {
         </button>
         <h1>Settings</h1>
       </div>
-      <p>Tabletop v1.4</p>
+      <p>Tabletop v1.5</p>
     </div>
 
     <div class="section-label">Data</div>
