@@ -258,6 +258,9 @@ img{display:block;max-width:100%}
   <div id="modal-log-play" class="modal modal--centered hidden"></div>
   <div id="modal-edit-session" class="modal modal--centered hidden"></div>
   <div id="modal-add-wishlist" class="modal modal--centered hidden"></div>
+  <div id="modal-collection-picker" class="modal hidden"></div>
+  <div id="modal-import-confirm" class="modal modal--centered hidden"></div>
+  <input type="file" id="import-file-input" accept=".json" style="display:none" onchange="handleImportFile(this)" />
 
   <div id="modal-reset" class="modal hidden">
     <div class="modal__handle"></div>
@@ -315,7 +318,7 @@ async function bggFetch(url) {
 // DATA LAYER
 // All reads/writes go through db. Swap Firebase later = rewrite only this object.
 // ─────────────────────────────────────────────────────────
-const KEYS = { GAMES:'tt_games', PLAYERS:'tt_players', SESSIONS:'tt_sessions', ACHIEVEMENTS:'tt_achievements' };
+const KEYS = { GAMES:'tt_games', PLAYERS:'tt_players', SESSIONS:'tt_sessions', ACHIEVEMENTS:'tt_achievements', FRIENDS:'tt_friend_collections' };
 function load(key) { try { return JSON.parse(localStorage.getItem(key)) || []; } catch { return []; } }
 function save(key, data) { localStorage.setItem(key, JSON.stringify(data)); }
 function uuid() { return crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2)+Date.now().toString(36); }
@@ -362,6 +365,26 @@ const db = {
   },
   updateSession(id, changes) { save(KEYS.SESSIONS, this.getSessions().map(s => s.id===id ? {...s,...changes} : s)); },
   deleteSession(id)  { save(KEYS.SESSIONS, this.getSessions().filter(s => s.id!==id)); },
+
+  // ── Friend collections ──
+  // Stored as an array of { name, importedAt, games[] } objects.
+  // Each entry is a read-only snapshot of another person's game collection.
+  // We store only games (not sessions/players/achievements) since those
+  // are personal data that only makes sense in their own app context.
+  // The name comes from the admin player in the exporter's app.
+  getFriendCollections() { return load(KEYS.FRIENDS); },
+  addFriendCollection(name, games) {
+    const collections = this.getFriendCollections();
+    // Replace if same name already exists — re-importing updates the snapshot
+    const existing = collections.findIndex(c => c.name === name);
+    const entry = { name, importedAt: new Date().toISOString(), games };
+    if (existing >= 0) collections[existing] = entry;
+    else collections.push(entry);
+    save(KEYS.FRIENDS, collections);
+  },
+  deleteFriendCollection(name) {
+    save(KEYS.FRIENDS, this.getFriendCollections().filter(c => c.name !== name));
+  },
 
   // ── Achievements ──
   getAchievements()    { return load(KEYS.ACHIEVEMENTS); },
@@ -529,7 +552,7 @@ function playTimeLabel(min,max) { if(!min&&!max)return null; if(!min||min===max)
 
 function confirmReset() {
   Object.values(KEYS).forEach(key=>localStorage.removeItem(key));
-  hotCache=null; discoverSection='wishlist';
+  hotCache=null; discoverSection='wishlist'; activeCollection=null;
   closeAllModals(); location.reload();
 }
 
@@ -579,8 +602,11 @@ function collapseFilterBar() {
 // Tonight filters — persisted as an object so all four survive tab switching
 const tonightFilters = { players:'2', complexity:'any', playtime:'any', mechanic:'' };
 
-let discoverSection = 'wishlist'; // 'wishlist' | 'hot'
+let discoverSection = 'wishlist';
 let hotCache = null;
+// activeCollection: null = my collection, or a friend collection object { name, games[] }
+// Lives at module scope so it persists across tab switches and re-renders.
+let activeCollection = null;
 
 // ─────────────────────────────────────────────────────────
 // VIEWS
@@ -638,35 +664,39 @@ function renderHome() {
 function renderGames() {
   const el=document.getElementById('view-games');
 
-  // Toggle bar — same pattern as Discover's Wishlist/Hot toggle.
-  // gamesSection persists across re-renders so switching to Tonight and back keeps your place.
   const toggleHTML=`
     <div class="discover-toggle" style="margin:0 20px 20px">
       <button class="discover-tab ${gamesSection==='games'?'active':''}" onclick="gamesSection='games';sortOpen=false;renderGames()">🎲 My Games</button>
-      <button class="discover-tab ${gamesSection==='tonight'?'active':''}" onclick="gamesSection='tonight';renderGames()">⭐ Tonight</button>
+      <button class="discover-tab ${gamesSection==='tonight'?'active':''}" onclick="gamesSection='tonight';renderGames()" ${activeCollection?'disabled style="opacity:0.4"':''}>⭐ Tonight</button>
     </div>`;
 
-  // When Tonight is selected, we render its content inside the Games view.
-  // renderTonight() writes to #view-tonight, so we can't call it directly —
-  // instead we inline the Tonight content generation here.
-  if(gamesSection==='tonight') {
-    // Hide the add-game pill — Tonight doesn't need it
+  if(gamesSection==='tonight' && !activeCollection) {
     document.getElementById('pill-add-game').classList.add('hidden');
     el.innerHTML=`
       <div class="page-header"><h1>Games</h1><p>Find the right game for tonight</p></div>
       ${toggleHTML}`;
-    // Append tonight content into the Games view
     renderTonightInto(el);
     return;
   }
 
-  // ── My Games section ────────────────────────────────────
-  // Restore the pill when back on My Games
-  document.getElementById('pill-add-game').classList.remove('hidden');
+  // When viewing a friend's collection, use their games instead of ours.
+  // The pill, sort, search and mechanic filter still work the same way —
+  // they just operate on a different array of games.
+  // We hide the Add pill and Tonight toggle since those don't apply to read-only data.
+  const isFriend = !!activeCollection;
+  const allOwned = isFriend
+    ? activeCollection.games.filter(g => !g.wishlist)
+    : db.getOwnedGames();
+  const allGames = isFriend ? activeCollection.games : db.getGames();
 
-  const allOwned=db.getOwnedGames();
-  const mechanics=db.getAllMechanics();
-  let games=gamesFilter?allOwned.filter(g=>(g.mechanics||[]).includes(gamesFilter)):allOwned;
+  if (isFriend) {
+    document.getElementById('pill-add-game').classList.add('hidden');
+  } else {
+    document.getElementById('pill-add-game').classList.remove('hidden');
+  }
+
+  const mechanics = [...new Set(allOwned.flatMap(g => g.mechanics||[]))].sort();
+  let games = gamesFilter ? allOwned.filter(g=>(g.mechanics||[]).includes(gamesFilter)) : allOwned;
   if(gamesSearch.trim()){const q=gamesSearch.trim().toLowerCase();games=games.filter(g=>g.title.toLowerCase().includes(q));}
 
   const sorted=[...games];
@@ -676,29 +706,25 @@ function renderGames() {
 
   const SORT_LABELS={ added:'Date added', name:'Name', plays:'Most played', rating:'BGG rating' };
 
-  // gamesFilterExpanded tracks whether the mechanic bar is showing all chips or just the first row.
-  // It lives outside renderGames so expanding/collapsing doesn't lose the active filter.
   const mechanicBar = mechanics.length ? `
     <div class="mechanic-filter-bar" id="mechanic-bar">
       <button class="mechanic-chip ${!gamesFilter?'active':''}" onclick="gamesFilter=null;renderGames()">All</button>
       ${mechanics.map(m=>`<button class="mechanic-chip ${gamesFilter===m?'active':''}" data-mechanic="${encodeURIComponent(m)}" onclick="gamesFilter=decodeURIComponent('${encodeURIComponent(m)}');renderGames()">${m}</button>`).join('')}
     </div>` : '';
 
-  // We need to collapse after the DOM is painted so we can measure chip positions.
-  // requestAnimationFrame waits until the browser has done a paint cycle,
-  // at which point getBoundingClientRect() returns real pixel positions.
-  // Without this the chips have no layout yet and all report the same Y position.
   if (mechanics.length) {
-    gamesFilterOverflow = []; // reset cache so fresh DOM chips get measured
+    gamesFilterOverflow = [];
     requestAnimationFrame(() => collapseFilterBar());
   }
 
   const gamesHTML=sorted.length?sorted.map(g=>{
     const health=db.getGameHealth(g.id);
+    const wishlistBadge = g.wishlist ? `<div class="game-card__wishlist-badge">🎯</div>` : '';
     return`<div class="game-card" onclick="openGameDetail('${g.id}')">
       <div class="game-card__cover">${coverHTML(g)}</div>
       ${g.rating?`<div class="game-card__rating">★ ${g.rating}</div>`:''}
-      ${health.plays?`<div class="game-card__plays-badge">${health.plays}×</div>`:''}
+      ${!isFriend && health.plays?`<div class="game-card__plays-badge">${health.plays}×</div>`:''}
+      ${wishlistBadge}
       <div class="game-card__info">
         <div class="game-card__title">${g.title}</div>
         <div class="game-card__meta">${g.minPlayers}–${g.maxPlayers}p${g.year?` · ${g.year}`:''}</div>
@@ -708,7 +734,7 @@ function renderGames() {
   }).join(''):`<div class="empty-state" style="grid-column:1/-1">
     <div class="empty-state__icon">📦</div>
     <div class="empty-state__title">${gamesSearch||gamesFilter?'No matches':'No games yet'}</div>
-    <div class="empty-state__body">${gamesSearch?`No games matching "${gamesSearch}".`:gamesFilter?'Try a different mechanic.':'Add your first game to start tracking.'}</div>
+    <div class="empty-state__body">${gamesSearch?`No games matching "${gamesSearch}".`:gamesFilter?'Try a different mechanic.':'No games in this collection.'}</div>
   </div>`;
 
   const sortDropdown=sortOpen?`
@@ -716,13 +742,26 @@ function renderGames() {
       ${Object.entries(SORT_LABELS).map(([k,v])=>`<div class="sort-option ${gamesSort===k?'active':''}" onclick="gamesSort='${k}';sortOpen=false;renderGames()">${v}</div>`).join('')}
     </div>`:'';
 
-  // isDefaultGamesState: true when nothing has been changed from defaults.
-  // Used to disable the reset button — visible always, interactive only when needed.
   const isDefaultGames = !gamesSearch && !gamesFilter && gamesSort === 'name';
 
+  // Collection picker button — always visible in the header.
+  // Shows the active collection name so the user always knows whose games they're viewing.
+  const friends = db.getFriendCollections();
+  const collectionLabel = activeCollection ? `${activeCollection.name} ▾` : `My Collection ▾`;
+  const collectionBtn = friends.length > 0 || activeCollection ? `
+    <button onclick="openCollectionPicker()" style="font-size:12px;color:var(--amber);font-weight:600;padding:4px 10px;border:1px solid rgba(232,168,56,0.4);border-radius:20px;white-space:nowrap">${collectionLabel}</button>` : '';
+
   el.innerHTML=`
-    <div class="page-header"><h1>Games</h1><p id="games-subtitle">${allOwned.length} game${allOwned.length!==1?'s':''} in your collection</p></div>
-    ${toggleHTML}
+    <div class="page-header" style="display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <h1>Games</h1>
+          <p id="games-subtitle">${isFriend ? `${activeCollection.name}'s collection · ${allOwned.length} game${allOwned.length!==1?'s':''}` : `${allOwned.length} game${allOwned.length!==1?'s':''} in your collection`}</p>
+        </div>
+        ${collectionBtn}
+      </div>
+    </div>
+    ${!isFriend ? toggleHTML : ''}
     <div style="position:relative">
       <div class="games-toolbar">
         <input class="games-search" type="text" placeholder="Search games…" value="${gamesSearch}"
@@ -747,7 +786,10 @@ function updateGamesGrid() {
   const subtitle = document.getElementById('games-subtitle');
   if (!grid) return;
 
-  const allOwned = db.getOwnedGames();
+  const isFriend = !!activeCollection;
+  const allOwned = isFriend
+    ? activeCollection.games.filter(g => !g.wishlist)
+    : db.getOwnedGames();
   let games = gamesFilter ? allOwned.filter(g=>(g.mechanics||[]).includes(gamesFilter)) : allOwned;
   if (gamesSearch.trim()) {
     const q = gamesSearch.trim().toLowerCase();
@@ -1624,8 +1666,163 @@ function saveEditSession() {
 // ─────────────────────────────────────────────────────────
 // NAVIGATION & MODALS
 // ─────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────
+// COLLECTION PICKER MODAL
+// ─────────────────────────────────────────────────────────
+function openCollectionPicker() {
+  const modal = document.getElementById('modal-collection-picker');
+  const friends = db.getFriendCollections();
+
+  modal.innerHTML = `
+    <div class="modal__handle"></div>
+    <button class="modal__close" onclick="closeModal('modal-collection-picker')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+    <div class="modal__title">Viewing collection</div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div class="settings-item ${!activeCollection?'':''}' style="background:${!activeCollection?'rgba(232,168,56,0.1)':'var(--navy-mid)'};border:1px solid ${!activeCollection?'rgba(232,168,56,0.4)':'transparent'};border-radius:var(--radius-md)"
+        onclick="activeCollection=null;closeModal('modal-collection-picker');renderGames()">
+        <div class="settings-item__icon">🎲</div>
+        <div class="settings-item__body">
+          <div class="settings-item__label">My Collection</div>
+          <div class="settings-item__desc">${db.getOwnedGames().length} games · ${db.getWishlist().length} on wishlist</div>
+        </div>
+        ${!activeCollection ? '<div style="color:var(--amber)">✓</div>' : ''}
+      </div>
+      ${friends.map(f => `
+        <div class="settings-item" style="background:${activeCollection?.name===f.name?'rgba(232,168,56,0.1)':'var(--navy-mid)'};border:1px solid ${activeCollection?.name===f.name?'rgba(232,168,56,0.4)':'transparent'};border-radius:var(--radius-md)"
+          onclick="activeCollection=${JSON.stringify(f).replace(/"/g,'&quot;')};closeModal('modal-collection-picker');renderGames()">
+          <div class="settings-item__icon">👤</div>
+          <div class="settings-item__body">
+            <div class="settings-item__label">${f.name}'s Collection</div>
+            <div class="settings-item__desc">${f.games.filter(g=>!g.wishlist).length} games · ${f.games.filter(g=>g.wishlist).length} on wishlist · Imported ${new Date(f.importedAt).toLocaleDateString('sv-SE')}</div>
+          </div>
+          ${activeCollection?.name===f.name ? '<div style="color:var(--amber)">✓</div>' : ''}
+        </div>`).join('')}
+    </div>`;
+  openModal('modal-collection-picker');
+}
+
+// ─────────────────────────────────────────────────────────
+// EXPORT / IMPORT
+// ─────────────────────────────────────────────────────────
+
+// exportData: bundles all four stores plus metadata into a JSON file.
+// The admin player's name is used as exportedBy — this is what gets used
+// as the collection name when a friend imports it.
+// We use a <a> element with a Blob URL to trigger the file download —
+// this is the standard browser technique for downloading generated content
+// without a server. The URL is revoked immediately after click to free memory.
+function exportData() {
+  const players = db.getPlayers();
+  const adminPlayer = players.find(p => p.isAdmin) || players[0];
+  const exportedBy = adminPlayer?.name || 'Unknown';
+
+  const payload = {
+    exportedBy,
+    exportedAt: new Date().toISOString(),
+    version: '1.2',
+    games: db.getGames(),
+    players,
+    sessions: db.getSessions(),
+    achievements: db.getAchievements(),
+  };
+
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `tabletop-${exportedBy.toLowerCase().replace(/\s+/g,'-')}-${new Date().toISOString().split('T')[0]}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  haptic();
+}
+
+// handleImportFile: reads the selected file and shows the confirmation modal.
+// We parse and validate before showing options so the user gets immediate
+// feedback if they accidentally selected the wrong file.
+let importPayload = null;
+function handleImportFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (!data.games || !data.exportedBy) throw new Error('Invalid format');
+      importPayload = data;
+      showImportConfirm(data);
+    } catch {
+      alert('Invalid file. Please select a Tabletop export file.');
+    }
+    input.value = ''; // reset so the same file can be re-selected if needed
+  };
+  reader.readAsText(file);
+}
+
+function showImportConfirm(data) {
+  const modal = document.getElementById('modal-import-confirm');
+  const gameCount = data.games?.filter(g=>!g.wishlist).length || 0;
+  const wishCount = data.games?.filter(g=>g.wishlist).length || 0;
+  const playerCount = data.players?.length || 0;
+  const sessionCount = data.sessions?.length || 0;
+
+  modal.innerHTML = `
+    <div class="modal__handle"></div>
+    <button class="modal__close" onclick="closeModal('modal-import-confirm');importPayload=null">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+    <div class="modal__title">Import data</div>
+    <div style="background:var(--navy-mid);border-radius:var(--radius-sm);padding:14px 16px;margin-bottom:20px">
+      <div style="font-size:13px;font-weight:600;color:var(--text-on-dark);margin-bottom:8px">From: ${data.exportedBy}</div>
+      <div style="font-size:12px;color:var(--text-on-dark-muted);line-height:1.8">
+        ${gameCount} game${gameCount!==1?'s':''} · ${wishCount} on wishlist<br/>
+        ${playerCount} player${playerCount!==1?'s':''} · ${sessionCount} session${sessionCount!==1?'s':''}
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <button class="btn btn--primary btn--full" onclick="importAsRestore()">
+        Restore my data
+        <div style="font-size:11px;font-weight:400;margin-top:2px;opacity:0.8">Replaces everything — use when switching phones</div>
+      </button>
+      <button class="btn btn--ghost btn--full" onclick="importAsFriend()">
+        Add as ${data.exportedBy}'s collection
+        <div style="font-size:11px;font-weight:400;margin-top:2px;opacity:0.7">Browse their games read-only, keeps your data intact</div>
+      </button>
+      <button class="btn btn--ghost btn--full" onclick="closeModal('modal-import-confirm');importPayload=null">Cancel</button>
+    </div>`;
+  openModal('modal-import-confirm');
+}
+
+function importAsRestore() {
+  if (!importPayload) return;
+  const my = db.getOwnedGames();
+  const myPlayers = db.getPlayers();
+  const mySessions = db.getSessions();
+  if (!confirm(`This will permanently replace your ${my.length} game${my.length!==1?'s':''}, ${myPlayers.length} player${myPlayers.length!==1?'s':''} and ${mySessions.length} session${mySessions.length!==1?'s':''}. Are you sure?`)) return;
+  localStorage.setItem(KEYS.GAMES, JSON.stringify(importPayload.games || []));
+  localStorage.setItem(KEYS.PLAYERS, JSON.stringify(importPayload.players || []));
+  localStorage.setItem(KEYS.SESSIONS, JSON.stringify(importPayload.sessions || []));
+  localStorage.setItem(KEYS.ACHIEVEMENTS, JSON.stringify(importPayload.achievements || []));
+  importPayload = null;
+  haptic(80);
+  closeAllModals();
+  location.reload();
+}
+
+function importAsFriend() {
+  if (!importPayload) return;
+  db.addFriendCollection(importPayload.exportedBy, importPayload.games || []);
+  importPayload = null;
+  haptic();
+  closeModal('modal-import-confirm');
+  renderSettings(); // refresh settings to show the new friend collection
+}
+
 function renderSettings() {
   const el = document.getElementById('view-settings');
+  const friends = db.getFriendCollections();
 
   el.innerHTML = `
     <div class="page-header">
@@ -1635,10 +1832,26 @@ function renderSettings() {
         </button>
         <h1>Settings</h1>
       </div>
-      <p>Tabletop v2.3</p>
+      <p>Tabletop v2.4</p>
     </div>
 
     <div class="section-label">Data</div>
+    <div class="settings-item" onclick="exportData()">
+      <div class="settings-item__icon">📤</div>
+      <div class="settings-item__body">
+        <div class="settings-item__label">Export my data</div>
+        <div class="settings-item__desc">Download a backup file with all your games, sessions and players</div>
+      </div>
+      <div class="settings-item__arrow"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9,18 15,12 9,6"/></svg></div>
+    </div>
+    <div class="settings-item" onclick="document.getElementById('import-file-input').click()">
+      <div class="settings-item__icon">📥</div>
+      <div class="settings-item__body">
+        <div class="settings-item__label">Import data</div>
+        <div class="settings-item__desc">Restore from a backup or add a friend's collection</div>
+      </div>
+      <div class="settings-item__arrow"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9,18 15,12 9,6"/></svg></div>
+    </div>
     <div class="settings-item" onclick="openModal('modal-reset')">
       <div class="settings-item__icon">🗑️</div>
       <div class="settings-item__body">
@@ -1647,6 +1860,19 @@ function renderSettings() {
       </div>
       <div class="settings-item__arrow"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9,18 15,12 9,6"/></svg></div>
     </div>
+
+    ${friends.length ? `
+      <div class="section-label" style="margin-top:24px">Friend collections</div>
+      ${friends.map(f => `
+        <div class="settings-item">
+          <div class="settings-item__icon">👤</div>
+          <div class="settings-item__body">
+            <div class="settings-item__label">${f.name}</div>
+            <div class="settings-item__desc">${f.games.filter(g=>!g.wishlist).length} games · Imported ${new Date(f.importedAt).toLocaleDateString('sv-SE')}</div>
+          </div>
+          <button onclick="if(confirm('Remove ${f.name.replace(/'/g,"\\'")}\\u2019s collection?')){db.deleteFriendCollection('${f.name.replace(/'/g,"\\'")}');if(activeCollection?.name==='${f.name.replace(/'/g,"\\'")}'){activeCollection=null;}renderSettings();renderGames();}" style="font-size:12px;color:var(--red);padding:6px 10px;border:1px solid rgba(196,69,54,0.3);border-radius:var(--radius-sm)">Remove</button>
+        </div>`).join('')}
+    ` : ''}
 
     <div class="section-label" style="margin-top:24px">About</div>
     <div style="margin:0 20px;background:var(--navy-light);border-radius:var(--radius-md);padding:16px 20px">
