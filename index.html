@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>Tabletop</title>
   <link rel="manifest" href="manifest.json" />
-  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -301,7 +301,7 @@ img{display:block;max-width:100%}
 // ─────────────────────────────────────────────────────────
 // BGG TOKEN — replace with your token from boardgamegeek.com/applications
 // ─────────────────────────────────────────────────────────
-const BGG_TOKEN = 'de2dd402-0f2f-427c-a8c8-a7010c217d3c';
+const BGG_TOKEN = 'PASTE_YOUR_TOKEN_HERE';
 const BGG_BASE  = 'https://boardgamegeek.com/xmlapi2';
 
 async function bggFetch(url) {
@@ -1013,6 +1013,7 @@ function openPlayerDetail(playerId) {
       <div style="width:64px;height:64px;border-radius:50%;background:var(--navy-mid);display:flex;align-items:center;justify-content:center;font-size:32px;border:2px solid ${player.isAdmin?'var(--amber)':'transparent'}">${player.avatar}</div>
       <div style="flex:1"><div class="modal__title" style="margin-bottom:0">${player.name}</div>${player.isAdmin?`<div style="font-size:12px;color:var(--amber)">Admin</div>`:''}</div>
       <button onclick="closeModal('modal-player-detail');openAddPlayer('${playerId}')" style="padding:8px 14px;border-radius:var(--radius-sm);border:1px solid rgba(255,255,255,0.15);color:var(--text-on-dark);font-size:13px;font-weight:500">Edit</button>
+      <button onclick="deletePlayer('${playerId}')" style="padding:8px 14px;border-radius:var(--radius-sm);border:1px solid rgba(196,69,54,0.4);color:var(--red);font-size:13px;font-weight:500">Delete</button>
     </div>
     <div class="stat-row" style="padding:0;margin-bottom:24px">
       <div class="stat-pill"><div class="stat-pill__value">${sessions.length}</div><div class="stat-pill__label">Sessions</div></div>
@@ -1275,6 +1276,25 @@ function savePlayer() {
   haptic(); editingPlayerId=null; closeModal('modal-add-player'); renderAll();
 }
 
+// deletePlayer keeps sessions intact — the session history is real and
+// shouldn't disappear just because someone leaves the group.
+// Sessions will still show the correct winner count; the player name
+// just won't resolve to a label anymore (shows blank in winner lists).
+// We warn the user about this before proceeding.
+function deletePlayer(playerId) {
+  const player = db.getPlayer(playerId);
+  if (!player) return;
+  const sessionCount = db.getSessionsForPlayer(playerId).length;
+  const warning = sessionCount > 0
+    ? `${player.name} has played ${sessionCount} session${sessionCount !== 1 ? 's' : ''}. Their session history will be kept but their name won't appear anymore.\n\nDelete anyway?`
+    : `Delete ${player.name}?`;
+  if (!confirm(warning)) return;
+  db.deletePlayer(playerId);
+  closeModal('modal-player-detail');
+  haptic();
+  renderAll();
+}
+
 // ─────────────────────────────────────────────────────────
 // LOG PLAY MODAL
 // ─────────────────────────────────────────────────────────
@@ -1466,7 +1486,7 @@ function renderSettings() {
         </button>
         <h1>Settings</h1>
       </div>
-      <p>Tabletop v1.7</p>
+      <p>Tabletop v1.2</p>
     </div>
 
     <div class="section-label">Data</div>
@@ -1545,7 +1565,6 @@ document.addEventListener('DOMContentLoaded',()=>{
   document.getElementById('btn-log').addEventListener('click',openLogPlay);
   document.getElementById('modal-overlay').addEventListener('click',closeAllModals);
   navigateTo('home');
-  if(!db.getPlayers().length&&!db.getGames().length) seedDemoData();
 
   // Scroll focused inputs into view after keyboard opens.
   // 300ms delay lets the keyboard animation finish first.
@@ -1557,27 +1576,6 @@ document.addEventListener('DOMContentLoaded',()=>{
     }
   });
 });
-
-// ─────────────────────────────────────────────────────────
-// DEMO SEED
-// ─────────────────────────────────────────────────────────
-function seedDemoData(){
-  const p1=db.addPlayer({name:'Sebastian',avatar:'🧙',isAdmin:true});
-  const p2=db.addPlayer({name:'Emelie',avatar:'🧝',isAdmin:false});
-  const p3=db.addPlayer({name:'Johan',avatar:'🦊',isAdmin:false});
-  const g1=db.addGame({title:'Spirit Island',bggId:'162886',thumbUrl:'',coverUrl:'',coverEmoji:'🌊',minPlayers:1,maxPlayers:4,complexity:4.0,isCoop:true,expansions:[{id:'e1',title:'Branch & Claw',owned:true,rating:'must_have',bggId:'231966'},{id:'e2',title:'Jagged Earth',owned:true,rating:'must_have',bggId:'285499'}],mechanics:['Cooperative Game','Variable Player Powers','Hand Management'],year:'2017',rating:8.4,minPlayTime:90,maxPlayTime:120,description:'A cooperative game of individual and collective skill in which players work as Spirits of the land to defend an island from colonizing invaders.'});
-  const g2=db.addGame({title:'Root',bggId:'237182',thumbUrl:'',coverUrl:'',coverEmoji:'🦝',minPlayers:2,maxPlayers:4,complexity:3.7,isCoop:false,expansions:[],mechanics:['Area Control','Asymmetric Gameplay','Hand Management'],year:'2018',rating:8.1,minPlayTime:60,maxPlayTime:90,description:'A game of adventure and war in which players battle for control of a vast woodland.'});
-  const g3=db.addGame({title:'Wingspan',bggId:'266192',thumbUrl:'',coverUrl:'',coverEmoji:'🦜',minPlayers:1,maxPlayers:5,complexity:2.4,isCoop:false,expansions:[{id:'e3',title:'European Expansion',owned:false,rating:'good',bggId:'290503'}],mechanics:['Hand Management','Engine Building','Card Drafting'],year:'2019',rating:8.0,minPlayTime:40,maxPlayTime:70,description:'A competitive bird-collection, engine-building game.'});
-  // Add a wishlist entry to demo the feature
-  db.addGame({title:'Twilight Imperium',bggId:'37111',thumbUrl:'',coverUrl:'',coverEmoji:'🚀',wishlist:true,minPlayers:3,maxPlayers:6,complexity:4.3,isCoop:false,expansions:[],mechanics:['Area Control','Negotiation'],year:'2017',rating:8.7,minPlayTime:240,maxPlayTime:480,description:'An epic game of galactic conquest.'});
-  const past=n=>{const d=new Date();d.setDate(d.getDate()-n);return d.toISOString().split('T')[0];};
-  db.addSession({gameId:g1.id,date:past(2),isCoop:true,players:[p1.id,p2.id,p3.id],winners:[p1.id,p2.id,p3.id],expansionsUsed:['e1'],notes:'Beat invader deck on difficulty 4'});
-  db.addSession({gameId:g2.id,date:past(7),isCoop:false,players:[p1.id,p2.id,p3.id],winners:[p2.id],expansionsUsed:[],notes:''});
-  db.addSession({gameId:g3.id,date:past(14),isCoop:false,players:[p1.id,p2.id],winners:[p1.id],expansionsUsed:[],notes:''});
-  db.addSession({gameId:g2.id,date:past(21),isCoop:false,players:[p1.id,p2.id,p3.id],winners:[p3.id],expansionsUsed:[],notes:''});
-  db.addSession({gameId:g1.id,date:past(30),isCoop:true,players:[p1.id,p2.id],winners:[],expansionsUsed:['e2'],notes:'Lost on the last round'});
-  achievements.recalculate();
-}
 </script>
 </body>
 </html>
