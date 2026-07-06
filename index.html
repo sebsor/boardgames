@@ -241,7 +241,7 @@ img{display:block;max-width:100%}
 // BGG TOKEN — paste your bearer token here
 // Get it from: boardgamegeek.com/applications -> Tokens
 // ─────────────────────────────────────────────────────────
-const BGG_TOKEN = 'de2dd402-0f2f-427c-a8c8-a7010c217d3c';
+const BGG_TOKEN = 'PASTE_YOUR_TOKEN_HERE';
 const BGG_BASE  = 'https://boardgamegeek.com/xmlapi2';
 
 // Central fetch helper — all BGG calls go through here.
@@ -367,11 +367,31 @@ const bgg = {
     try {
       const text = await bggFetch(`${BGG_BASE}/search?query=${encodeURIComponent(query)}&type=boardgame`);
       const xml  = new DOMParser().parseFromString(text, 'text/xml');
-      return [...xml.querySelectorAll('item')].slice(0, 8).map(item => ({
+
+      // Take more results before sorting so the right game has a chance to appear.
+      // BGG returns them in its own relevance order which doesn't prioritise name matches.
+      const results = [...xml.querySelectorAll('item')].slice(0, 40).map(item => ({
         bggId: item.getAttribute('id'),
         title: item.querySelector('name[type="primary"]')?.getAttribute('value') || 'Unknown',
         year:  item.querySelector('yearpublished')?.getAttribute('value') || '',
       }));
+
+      // Re-sort by how closely the title matches the query string.
+      // This runs entirely in JS after the fetch — no extra API calls.
+      // Priority: exact match (0) > starts with query (1) > contains query (2) > everything else (3)
+      // We lowercase both sides so "small world" matches "Small World".
+      const q = query.toLowerCase().trim();
+      results.sort((a, b) => {
+        const aName = a.title.toLowerCase();
+        const bName = b.title.toLowerCase();
+        const score = name =>
+          name === q         ? 0 :
+          name.startsWith(q) ? 1 :
+          name.includes(q)   ? 2 : 3;
+        return score(aName) - score(bName);
+      });
+
+      return results.slice(0, 8);
     } catch(e) { console.error('BGG search', e); return []; }
   },
 
